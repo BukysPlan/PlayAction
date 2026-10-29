@@ -60,6 +60,41 @@ small{color:var(--mut)}.hide{display:none!important}body[data-m=A] .ed,body[data
 <label>Velocidad <span id="vl"></span></label><input id="vs" type="range" min="0.5" max="1.5" step="0.05"><button id="cp" style="margin-top:10px;width:100%">Borrar camino</button></div>
 </aside></main>
 <div id="ov"></div><div id="md" class="hide"><div><p id="mm" style="margin:0 0 10px;font-weight:600"></p><input id="mi" style="width:100%;margin-bottom:10px"><div style="display:flex;gap:8px;justify-content:flex-end"><button id="mc">Cancelar</button><button id="mo" class="p">Aceptar</button></div></div></div>
+
+<!-- PANTALLA DE LOGIN -->
+<div id="login-screen" style="position:fixed;inset:0;background:#14181d;z-index:9999;display:grid;place-items:center;color:#fff;font-family:Inter,sans-serif">
+  <div style="background:#232a33;padding:30px;border-radius:8px;width:300px;text-align:center;border-top:4px solid #ff6300">
+    <h2 style="margin-top:0">PlayAction</h2>
+    <p style="font-size:13px;color:#9aa5b3">Inicia sesión para acceder a las jugadas del equipo</p>
+    <input id="login-email" type="email" placeholder="Correo electrónico" style="width:100%;margin-bottom:10px;background:#14181d;border:1px solid #3a444f;color:#fff;padding:8px;border-radius:4px">
+    <input id="login-pass" type="password" placeholder="Contraseña" style="width:100%;margin-bottom:15px;background:#14181d;border:1px solid #3a444f;color:#fff;padding:8px;border-radius:4px">
+    <button id="login-btn" class="p" style="width:100%;margin-bottom:10px;padding:10px">Entrar</button>
+    <div id="login-msg" style="color:#ff6300;font-size:12px;margin-top:10px;min-height:15px"></div>
+  </div>
+</div>
+
+<!-- FIREBASE SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
+  import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAKi0ru5DjIX9lhglak3XJkFTLxW7nWWy0",
+    authDomain: "playaction-6686b.firebaseapp.com",
+    projectId: "playaction-6686b",
+    storageBucket: "playaction-6686b.firebasestorage.app",
+    messagingSenderId: "589990426836",
+    appId: "1:589990426836:web:663f88b4ff74b9303b6341"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  window.FirebaseApp = { auth, db, signInWithEmailAndPassword, onAuthStateChanged, signOut, collection, doc, setDoc, deleteDoc, onSnapshot };
+</script>
+
 <script>
 const $=id=>document.getElementById(id),cv=$('cv'),g=cv.getContext('2d'),LOS=290;
 const OFF=[['LT',270,306,'OL'],['LG',305,306,'OL'],['C',340,306,'OL'],['RG',375,306,'OL'],['RT',410,306,'OL'],['TE',447,310,'TE'],['QB',340,345,'QB'],['RB',340,385,'RB'],['X',70,308,'WR'],['Z',575,308,'WR'],['Y',480,332,'WR']];
@@ -78,12 +113,75 @@ let plays=[],forms=[],folders=[],act='',op={},cur=null,sel=null,sels=[],mode='E'
 const P=id=>cur.players.find(p=>p.id==id),FL=s=>[...(s=='o'?bO:bD),...forms.filter(f=>f.side==s)],dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 const mk=()=>({name:'Jugada '+(plays.length+1),type:'pass',prot:'M',dir:'C',notes:'',players:[...OFF,...DEF].map((a,i)=>({id:a[0],t:i<11?'o':'d',pos:a[3],x:a[1],y:a[2],ac:'route',pts:[],tg:'',dl:1.5,r:38}))});
 const cp=o=>JSON.parse(JSON.stringify(o));
-async function put(col,o0){const o=cp(o0),id=o.id;delete o.id;delete o._n;if(db)await db.collection(col).doc(id).set({json:JSON.stringify(o)});else{o.id=id;const L=col=='plays'?plays:col=='folders'?folders:forms,i=L.findIndex(x=>x.id==id);i<0?L.push(o):L[i]=o;localStorage.setItem({plays:'pb',forms:'fm',folders:'fd'}[col],JSON.stringify(L))}}
-async function del(col,id){if(db)await db.collection(col).doc(id).delete();else{if(col=='plays')plays=plays.filter(x=>x.id!=id);else if(col=='folders')folders=folders.filter(x=>x.id!=id);else forms=forms.filter(x=>x.id!=id);localStorage.setItem({plays:'pb',forms:'fm',folders:'fd'}[col],JSON.stringify(col=='plays'?plays:col=='folders'?folders:forms))}}
-async function init(){try{db=await claude.use('db');const u=await claude.use('user');canEdit=u?await u.canEdit():true}catch(e){db=null}
- if(db){db.collection('plays').onSnapshot(s=>{plays=s.docs.map(d=>({id:d.id,...JSON.parse(d.data().json)}));ui()});db.collection('forms').onSnapshot(s=>{forms=s.docs.map(d=>({id:d.id,...JSON.parse(d.data().json)}));fill()});db.collection('folders').onSnapshot(s=>{folders=s.docs.map(d=>({id:d.id,...JSON.parse(d.data().json)}));ui()})}
- else{try{plays=JSON.parse(localStorage.getItem('pb')||'[]');forms=JSON.parse(localStorage.getItem('fm')||'[]');folders=JSON.parse(localStorage.getItem('fd')||'[]')}catch(e){}ui()}
- fill();document.body.classList.toggle('ro',!canEdit);setMode(canEdit?'E':'A')}
+
+// --- LÓGICA DE FIREBASE ---
+let currentUser = null;
+
+async function put(col,o0){
+  const o=cp(o0),id=o.id;delete o.id;delete o._n;
+  if (window.FirebaseApp && window.FirebaseApp.db) {
+    await window.FirebaseApp.setDoc(window.FirebaseApp.doc(window.FirebaseApp.db, col, id), { json: JSON.stringify(o) });
+  } else {
+    o.id=id;const L=col=='plays'?plays:col=='folders'?folders:forms,i=L.findIndex(x=>x.id==id);i<0?L.push(o):L[i]=o;localStorage.setItem({plays:'pb',forms:'fm',folders:'fd'}[col],JSON.stringify(L));
+  }
+}
+
+async function del(col,id){
+  if (window.FirebaseApp && window.FirebaseApp.db) {
+    await window.FirebaseApp.deleteDoc(window.FirebaseApp.doc(window.FirebaseApp.db, col, id));
+  } else {
+    if(col=='plays')plays=plays.filter(x=>x.id!=id);else if(col=='folders')folders=folders.filter(x=>x.id!=id);else forms=forms.filter(x=>x.id!=id);
+    localStorage.setItem({plays:'pb',forms:'fm',folders:'fd'}[col],JSON.stringify(col=='plays'?plays:col=='folders'?folders:forms))
+  }
+}
+
+async function init(){
+  if (!window.FirebaseApp) {
+    console.log("Firebase no cargado aún. Usando localStorage.");
+    try{plays=JSON.parse(localStorage.getItem('pb')||'[]');forms=JSON.parse(localStorage.getItem('fm')||'[]');folders=JSON.parse(localStorage.getItem('fd')||'[]')}catch(e){}
+    ui(); fill(); setMode('E'); return;
+  }
+
+  const fb = window.FirebaseApp;
+
+  document.getElementById('login-btn').onclick = () => {
+    const email = document.getElementById('login-email').value;
+    const pass = document.getElementById('login-pass').value;
+    const msg = document.getElementById('login-msg');
+    msg.textContent = 'Entrando...';
+    fb.signInWithEmailAndPassword(fb.auth, email, pass)
+      .catch(err => msg.textContent = 'Error: ' + err.message);
+  };
+
+  fb.onAuthStateChanged(fb.auth, (user) => {
+    if (user) {
+      currentUser = user;
+      document.getElementById('login-screen').style.display = 'none';
+      document.body.classList.remove('ro');
+      
+      fb.onSnapshot(fb.collection(fb.db, "plays"), (snap) => {
+        plays = snap.docs.map(d => ({ id: d.id, ...JSON.parse(d.data().json) }));
+        ui();
+      });
+      fb.onSnapshot(fb.collection(fb.db, "forms"), (snap) => {
+        forms = snap.docs.map(d => ({ id: d.id, ...JSON.parse(d.data().json) }));
+        fill(); fl();
+      });
+      fb.onSnapshot(fb.collection(fb.db, "folders"), (snap) => {
+        folders = snap.docs.map(d => ({ id: d.id, ...JSON.parse(d.data().json) }));
+        ui();
+      });
+
+      setMode('E');
+    } else {
+      currentUser = null;
+      document.getElementById('login-screen').style.display = 'grid';
+      document.body.classList.add('ro');
+    }
+  });
+}
+// ---------------------------
+
 function modal(msg,inp,cb,def){const i=$('mi');$('mm').textContent=msg;i.classList.toggle('hide',!inp);i.value=def||'';$('md').classList.remove('hide');if(inp)i.focus();$('mo').onclick=()=>{$('md').classList.add('hide');cb(i.value.trim())};$('mc').onclick=()=>$('md').classList.add('hide')}
 function fill(){for(const s of['o','d']){const el=$(s=='o'?'fo':'fd'),v=el.value;el.innerHTML='<option value="">Elegir formación…</option>'+FL(s).map(f=>`<option value="${f.id}">${f.name.replace(/</g,'&lt;')}${f.b?'':' ★'}</option>`).join('');el.value=v;$('x'+s).classList.toggle('hide',!v||v.startsWith('b:'))}}
 function applyForm(s,id){const f=FL(s).find(x=>x.id==id);if(!f||!cur)return;(s=='o'?OFF:DEF).forEach(a=>{const p=P(a[0]),q=f.pos&&f.pos[a[0]]||[a[1],a[2]];p.x=q[0];p.y=q[1];if(s=='d'){const as=f.as&&f.as[a[0]];p.pts=[];p.tg='';p.gap='';p.ac=as?as[0]:a[3]=='DL'?'blitz':'react';if(as&&as[0]=='zone'){p.pts=[[as[1],as[2]]];p.r=as[3]||38}if(as&&as[0]=='man')p.tg=as[1];if(as&&as[0]=='blitz')p.gap=as[1]||''}});draw();side()}
@@ -213,5 +311,7 @@ $('nfd').onclick=()=>modal('Nombre del paquete o rival',1,async v=>{if(!v)return
 $('mb').onclick=()=>document.body.classList.toggle('pn');$('ov').onclick=()=>document.body.classList.remove('pn');
 let passArm=false;function setPass(v){passArm=v;$('rb').classList.toggle('p',v);$('rb').textContent=v?'Pasar ✓':'Pasar (RPO)'}$('rb').onclick=()=>setPass(!passArm);$('rs').addEventListener('click',()=>setPass(false));function def(i,pts){const p=P(i);p.ac='route';p.pts=pts}
 let zon=false;$('zt').onclick=()=>{zon=!zon;$('zt').classList.toggle('on',zon);draw()};
-init();requestAnimationFrame(loop);
+
+init();
+requestAnimationFrame(loop);
 </script></body></html>
